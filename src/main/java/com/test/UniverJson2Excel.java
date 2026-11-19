@@ -23,6 +23,8 @@ import com.aspose.cells.IconSet;
 import com.aspose.cells.IconSetType;
 import com.aspose.cells.CellArea;
 import com.aspose.cells.OperatorType;
+import com.aspose.cells.PageOrientationType;
+import com.aspose.cells.PageSetup;
 import com.aspose.cells.SaveFormat;
 import com.aspose.cells.Style;
 import com.aspose.cells.TextAlignmentType;
@@ -62,7 +64,7 @@ import java.util.Map;
  *   <li>冻结 freeze、工作表隐藏、标题颜色、缩放、网格线</li>
  *   <li>resources 中的 SHEET_FILTER_PLUGIN(自动筛选)、SHEET_NOTE_PLUGIN(批注)、
  *       SHEET_DRAWING_PLUGIN(图片)、SHEET_CONDITIONAL_FORMATTING_PLUGIN(条件格式)、
- *       SHEET_PRINT_AREA_PLUGIN(打印区域)</li>
+ *       SHEET_PAGE_LAYOUT_PLUGIN(页面布局/打印区域)</li>
  * </ul>
  */
 public final class UniverJson2Excel {
@@ -715,8 +717,8 @@ public final class UniverJson2Excel {
                 applyDrawingResource(data, sheetMap);
             } else if ("SHEET_CONDITIONAL_FORMATTING_PLUGIN".equals(name) && !data.isEmpty()) {
                 applyConditionalFormattingResource(data, sheetMap);
-            } else if ("SHEET_PRINT_AREA_PLUGIN".equals(name) && !data.isEmpty()) {
-                applyPrintAreaResource(data, sheetMap);
+            } else if ("SHEET_PAGE_LAYOUT_PLUGIN".equals(name) && !data.isEmpty()) {
+                applyPageLayoutResource(data, sheetMap);
             }
         }
     }
@@ -1217,13 +1219,29 @@ public final class UniverJson2Excel {
                 .replace("&#39;", "'");
     }
 
-    private static void applyPrintAreaResource(String data, Map<String, Worksheet> sheetMap) {
+    /**
+     * 处理页面布局资源。
+     *
+     * <p>新版本 Univer 使用 {@code SHEET_PAGE_LAYOUT_PLUGIN}，数据结构示例：</p>
+     * <pre>
+     * {
+     *   "sheet-1": {
+     *     "printArea": [{"startRow":0,"startColumn":0,"endRow":35,"endColumn":8}],
+     *     "margins": {"top":0.75,"bottom":0.75,"left":0.7,"right":0.7,"header":0.3,"footer":0.3},
+     *     "pageSetup": {"orientation":"landscape","paperSize":9},
+     *     "rowBreaks": [20]
+     *   }
+     * }
+     * </pre>
+     *
+     */
+    private static void applyPageLayoutResource(String data, Map<String, Worksheet> sheetMap) {
         try {
-            JsonNode printAreaData = MAPPER.readTree(data);
-            if (!printAreaData.isObject()) {
+            JsonNode layoutData = MAPPER.readTree(data);
+            if (!layoutData.isObject()) {
                 return;
             }
-            Iterator<Map.Entry<String, JsonNode>> sheetIt = printAreaData.fields();
+            Iterator<Map.Entry<String, JsonNode>> sheetIt = layoutData.fields();
             while (sheetIt.hasNext()) {
                 Map.Entry<String, JsonNode> sheetEntry = sheetIt.next();
                 Worksheet worksheet = sheetMap.get(sheetEntry.getKey());
@@ -1232,33 +1250,122 @@ public final class UniverJson2Excel {
                 }
                 JsonNode sheetValue = sheetEntry.getValue();
                 if (sheetValue.isTextual()) {
+                    // 兼容旧版直接保存打印区域字符串的结构
                     worksheet.getPageSetup().setPrintArea(sheetValue.asText());
                     continue;
                 }
                 if (!sheetValue.isObject()) {
                     continue;
                 }
-                JsonNode ranges = sheetValue.path("ranges");
-                if (!ranges.isArray()) {
-                    continue;
-                }
-                List<String> areas = new ArrayList<>();
-                for (JsonNode range : ranges) {
-                    int startRow = range.path("startRow").asInt(-1);
-                    int startCol = range.path("startColumn").asInt(-1);
-                    int endRow = range.path("endRow").asInt(-1);
-                    int endCol = range.path("endColumn").asInt(-1);
-                    if (startRow < 0 || startCol < 0 || endRow < startRow || endCol < startCol) {
-                        continue;
-                    }
-                    areas.add(excelRange(startRow, startCol, endRow, endCol));
-                }
-                if (!areas.isEmpty()) {
-                    worksheet.getPageSetup().setPrintArea(String.join(",", areas));
-                }
+
+                PageSetup pageSetup = worksheet.getPageSetup();
+                applyPrintArea(pageSetup, sheetValue);
+                applyPageMargins(pageSetup, sheetValue.path("margins"));
+                applyPageSetup(pageSetup, sheetValue.path("pageSetup"));
+                applyPageBreaks(worksheet, sheetValue);
             }
         } catch (IOException e) {
             // 忽略无法解析的插件数据
+        }
+    }
+
+    private static void applyPrintArea(PageSetup pageSetup, JsonNode sheetValue) {
+        // 新版页面布局：printArea 是 IRange 数组
+        JsonNode printArea = sheetValue.path("printArea");
+        if (printArea.isObject()) {
+            printArea = printArea.path("ranges");
+        }
+        if (printArea.isTextual()) {
+            pageSetup.setPrintArea(printArea.asText());
+            return;
+        }
+        if (printArea.isArray()) {
+            List<String> areas = rangeAreas(printArea);
+            if (!areas.isEmpty()) {
+                pageSetup.setPrintArea(String.join(",", areas));
+            }
+            return;
+        }
+    }
+
+    private static List<String> rangeAreas(JsonNode ranges) {
+        List<String> areas = new ArrayList<>();
+        for (JsonNode range : ranges) {
+            int startRow = range.path("startRow").asInt(-1);
+            int startCol = range.path("startColumn").asInt(-1);
+            int endRow = range.path("endRow").asInt(-1);
+            int endCol = range.path("endColumn").asInt(-1);
+            if (startRow < 0 || startCol < 0 || endRow < startRow || endCol < startCol) {
+                continue;
+            }
+            areas.add(excelRange(startRow, startCol, endRow, endCol));
+        }
+        return areas;
+    }
+
+    private static void applyPageMargins(PageSetup pageSetup, JsonNode margins) {
+        if (!margins.isObject()) {
+            return;
+        }
+        // Univer 的页边距单位是英寸，使用 Aspose 的 Inch 系列方法可保持数值一致
+        if (margins.path("top").isNumber()) {
+            pageSetup.setTopMarginInch(margins.path("top").asDouble());
+        }
+        if (margins.path("bottom").isNumber()) {
+            pageSetup.setBottomMarginInch(margins.path("bottom").asDouble());
+        }
+        if (margins.path("left").isNumber()) {
+            pageSetup.setLeftMarginInch(margins.path("left").asDouble());
+        }
+        if (margins.path("right").isNumber()) {
+            pageSetup.setRightMarginInch(margins.path("right").asDouble());
+        }
+        if (margins.path("header").isNumber()) {
+            pageSetup.setHeaderMarginInch(margins.path("header").asDouble());
+        }
+        if (margins.path("footer").isNumber()) {
+            pageSetup.setFooterMarginInch(margins.path("footer").asDouble());
+        }
+    }
+
+    private static void applyPageSetup(PageSetup pageSetup, JsonNode pageSetupNode) {
+        if (!pageSetupNode.isObject()) {
+            return;
+        }
+        String orientation = pageSetupNode.path("orientation").asText("");
+        if ("landscape".equalsIgnoreCase(orientation)) {
+            pageSetup.setOrientation(PageOrientationType.LANDSCAPE);
+        } else if ("portrait".equalsIgnoreCase(orientation)) {
+            pageSetup.setOrientation(PageOrientationType.PORTRAIT);
+        }
+        int paperSize = pageSetupNode.path("paperSize").asInt(-1);
+        if (paperSize > 0) {
+            pageSetup.setPaperSize(paperSize);
+        }
+    }
+
+    private static void applyPageBreaks(Worksheet worksheet, JsonNode sheetValue) {
+        JsonNode rowBreaks = sheetValue.path("rowBreaks");
+        if (rowBreaks.isArray()) {
+            for (JsonNode breakNode : rowBreaks) {
+                int row = breakNode.isObject()
+                        ? breakNode.path("id").asInt(-1)
+                        : breakNode.asInt(-1);
+                if (row >= 0) {
+                    worksheet.getHorizontalPageBreaks().add(row);
+                }
+            }
+        }
+        JsonNode columnBreaks = sheetValue.path("columnBreaks");
+        if (columnBreaks.isArray()) {
+            for (JsonNode breakNode : columnBreaks) {
+                int column = breakNode.isObject()
+                        ? breakNode.path("id").asInt(-1)
+                        : breakNode.asInt(-1);
+                if (column >= 0) {
+                    worksheet.getVerticalPageBreaks().add(column);
+                }
+            }
         }
     }
 

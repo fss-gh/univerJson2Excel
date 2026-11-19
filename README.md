@@ -30,7 +30,7 @@
   - `SHEET_NOTE_PLUGIN`：批注
   - `SHEET_DRAWING_PLUGIN`：图片
   - `SHEET_CONDITIONAL_FORMATTING_PLUGIN`：条件格式（`highlightCell`、`colorScale`、`dataBar`、`iconSet`）
-  - `SHEET_PRINT_AREA_PLUGIN`：打印区域
+  - `SHEET_PAGE_LAYOUT_PLUGIN`：页面布局（打印区域、页边距、纸张方向/大小、分页符）
 
 ## 环境要求
 
@@ -128,7 +128,7 @@ public class Demo {
 | `SHEET_NOTE_PLUGIN` | 批注 |
 | `SHEET_DRAWING_PLUGIN` | 图片 |
 | `SHEET_CONDITIONAL_FORMATTING_PLUGIN` | 条件格式（`highlightCell`、`colorScale`、`dataBar`、`iconSet`） |
-| `SHEET_PRINT_AREA_PLUGIN` | 打印区域 |
+| `SHEET_PAGE_LAYOUT_PLUGIN` | 页面布局：打印区域、页边距、纸张方向/大小、分页符 |
 
 ## 条件格式说明
 
@@ -153,6 +153,44 @@ public class Demo {
   - 支持 `num` / `percent` / `percentile` / `formula` 等取值类型
   - 部分图标集（如 `3Triangles`、`3Stars` 等）会以 x14 扩展条件格式写入，Excel 2010+ 可正常显示
 
+## 页面布局说明
+
+`SHEET_PAGE_LAYOUT_PLUGIN` 的 `data` 按工作表 ID 保存页面布局，支持以下字段：
+
+- `printArea`：`IRange` 数组，转换为 Excel 打印区域；多个区域会用英文逗号连接
+- `margins`：页边距，单位为英寸
+  - `top` / `bottom` / `left` / `right` / `header` / `footer`
+- `pageSetup`：
+  - `orientation`：`landscape` / `portrait`
+  - `paperSize`：Excel 纸张大小编号，如 `9` 表示 A4
+- `rowBreaks`：水平分页符行索引数组
+- `columnBreaks`：垂直分页符列索引数组
+
+示例：
+
+```json
+{
+  "sheet-1": {
+    "printArea": [
+      { "startRow": 0, "startColumn": 0, "endRow": 35, "endColumn": 8 }
+    ],
+    "margins": {
+      "top": 0.75,
+      "bottom": 0.75,
+      "left": 0.7,
+      "right": 0.7,
+      "header": 0.3,
+      "footer": 0.3
+    },
+    "pageSetup": {
+      "orientation": "landscape",
+      "paperSize": 9
+    },
+    "rowBreaks": [20]
+  }
+}
+```
+
 ## 当前未支持（可继续扩展）
 
 - `SHEET_DATA_VALIDATION_PLUGIN`：数据验证
@@ -165,8 +203,8 @@ public class Demo {
 
 ## 示例数据
 
-- `src/main/resources/data/univerData.json`：基础示例（含公式、富文本、批注、图片、筛选，以及色阶/数据条/图标集/前 N 项/大于条件格式）
-- `src/main/resources/data/univerData2.json`：扩展示例（含打印区域、`highlightCell` 条件格式）
+- `src/main/resources/data/univerData.json`：基础示例（含公式、富文本、批注、图片、筛选、页面布局，以及色阶/数据条/图标集/前 N 项/大于条件格式）
+- `src/main/resources/data/univerData2.json`：扩展示例（含旧版打印区域、`highlightCell` 条件格式）
 
 ## 最近更新
 
@@ -175,6 +213,7 @@ public class Demo {
 - 修复 `iconSet` 阈值类型和顺序还原（如 `percent` 类型的 `3Triangles` 等）
 - 修复 `Top10` 条件格式被错误还原为 `CellIs equal` 的问题
 - 修复条件格式背景色兼容性：DXF 同时写入 `fgColor` 与 `bgColor`，避免部分 Excel/WPS 不显示单元格底色
+- 适配 `SHEET_PAGE_LAYOUT_PLUGIN` 页面布局：打印区域、页边距、纸张方向/大小、行/列分页符
 
 ## 注意事项
 
