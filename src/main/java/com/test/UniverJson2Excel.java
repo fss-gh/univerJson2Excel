@@ -51,7 +51,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 将 Univer Sheets 工作簿快照(JSON)转换为 Excel 的工具类。
+ * 将 Univer Sheets 工作簿快照(JSON)转换为 Excel 的工具类，
+ * 并支持将生成结果或已有 Excel 文件导出为 PDF。
  *
  * <p>支持的数据范围：</p>
  * <ul>
@@ -117,6 +118,96 @@ public final class UniverJson2Excel {
     public static byte[] toXlsxBytes(String univerJson) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         convertToOutputStream(new java.io.ByteArrayInputStream(univerJson.getBytes(java.nio.charset.StandardCharsets.UTF_8)), out);
+        return out.toByteArray();
+    }
+
+    /**
+     * 将 Univer JSON 字符串转换为 PDF 文件。
+     *
+     * <p>导出 PDF 时会使用工作簿的页面布局（打印区域、页边距、纸张方向/大小、分页符）。</p>
+     *
+     * @param univerJson Univer 工作簿 JSON
+     * @param outputPath 输出 PDF 路径
+     */
+    public static void convertToPdf(String univerJson, String outputPath) throws Exception {
+        Workbook workbook = toWorkbook(univerJson);
+        try {
+            workbook.save(outputPath, SaveFormat.PDF);
+        } finally {
+            workbook.dispose();
+        }
+    }
+
+    /**
+     * 将 Univer JSON 文件转换为 PDF 文件。
+     */
+    public static void convertToPdf(File univerJsonFile, String outputPath) throws Exception {
+        try (InputStream in = new FileInputStream(univerJsonFile)) {
+            Workbook workbook = toWorkbook(in);
+            try {
+                workbook.save(outputPath, SaveFormat.PDF);
+            } finally {
+                workbook.dispose();
+            }
+        }
+    }
+
+    /**
+     * 将 Univer JSON 输入流转换为 PDF 输出流。
+     */
+    public static void convertToPdf(InputStream univerJson, OutputStream pdfOut) throws Exception {
+        Workbook workbook = toWorkbook(univerJson);
+        try {
+            workbook.save(pdfOut, SaveFormat.PDF);
+        } finally {
+            workbook.dispose();
+        }
+    }
+
+    /**
+     * 将 Univer JSON 字符串转换为 PDF 字节数组。
+     */
+    public static byte[] toPdfBytes(String univerJson) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        convertToPdf(
+                new ByteArrayInputStream(univerJson.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                out);
+        return out.toByteArray();
+    }
+
+    /**
+     * 将已有的 Excel 文件打印/导出为 PDF 文件。
+     *
+     * @param excelPath 已有 Excel 文件路径
+     * @param pdfPath   输出 PDF 路径
+     */
+    public static void excelToPdf(String excelPath, String pdfPath) throws Exception {
+        Workbook workbook = new Workbook(excelPath);
+        try {
+            workbook.save(pdfPath, SaveFormat.PDF);
+        } finally {
+            workbook.dispose();
+        }
+    }
+
+    /**
+     * 将已有的 Excel 输入流打印/导出为 PDF 输出流。
+     */
+    public static void excelToPdf(InputStream excelIn, OutputStream pdfOut) throws Exception {
+        Workbook workbook = new Workbook(excelIn);
+        try {
+            workbook.save(pdfOut, SaveFormat.PDF);
+        } finally {
+            workbook.dispose();
+        }
+    }
+
+    /**
+     * 将已有的 Excel 输入流打印/导出为 PDF 字节数组。
+     */
+    public static byte[] excelToPdfBytes(InputStream excelIn) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        excelToPdf(excelIn, out);
         return out.toByteArray();
     }
 
@@ -1249,11 +1340,6 @@ public final class UniverJson2Excel {
                     continue;
                 }
                 JsonNode sheetValue = sheetEntry.getValue();
-                if (sheetValue.isTextual()) {
-                    // 兼容旧版直接保存打印区域字符串的结构
-                    worksheet.getPageSetup().setPrintArea(sheetValue.asText());
-                    continue;
-                }
                 if (!sheetValue.isObject()) {
                     continue;
                 }
@@ -1341,6 +1427,42 @@ public final class UniverJson2Excel {
         int paperSize = pageSetupNode.path("paperSize").asInt(-1);
         if (paperSize > 0) {
             pageSetup.setPaperSize(paperSize);
+        }
+        applyScaleMode(pageSetup, pageSetupNode);
+    }
+
+    /**
+     * 处理打印缩放方式。
+     *
+     * <p>Univer 的 {@code scaleMode} 取值：</p>
+     * <ul>
+     *   <li>{@code none}：不缩放，恢复普通缩放比例（默认 100%）</li>
+     *   <li>{@code fitSheet}：整个工作表缩放到一页</li>
+     *   <li>{@code fitColumns}：所有列缩放到一页宽，行可跨页</li>
+     *   <li>{@code fitRows}：所有行缩放到一页高，列可跨页</li>
+     * </ul>
+     */
+    private static void applyScaleMode(PageSetup pageSetup, JsonNode pageSetupNode) {
+        String scaleMode = pageSetupNode.path("scaleMode").asText("");
+        if ("fitSheet".equalsIgnoreCase(scaleMode)) {
+            // 所有行和列都缩放到一页
+            pageSetup.setFitToPagesWide(1);
+            pageSetup.setFitToPagesTall(1);
+        } else if ("fitColumns".equalsIgnoreCase(scaleMode)) {
+            // 所有列缩放到一页宽，行不限
+            pageSetup.setFitToPagesWide(1);
+            pageSetup.setFitToPagesTall(0);
+        } else if ("fitRows".equalsIgnoreCase(scaleMode)) {
+            // 所有行缩放到一页高，列不限
+            pageSetup.setFitToPagesWide(0);
+            pageSetup.setFitToPagesTall(1);
+        } else if ("none".equalsIgnoreCase(scaleMode)) {
+            // 关闭“调整为”模式；setZoom 会清除 fitToPage 标记
+            int scale = pageSetupNode.path("scale").asInt(100);
+            if (scale < 10 || scale > 400) {
+                scale = 100;
+            }
+            pageSetup.setZoom(scale);
         }
     }
 

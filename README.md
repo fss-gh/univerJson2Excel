@@ -30,7 +30,11 @@
   - `SHEET_NOTE_PLUGIN`：批注
   - `SHEET_DRAWING_PLUGIN`：图片
   - `SHEET_CONDITIONAL_FORMATTING_PLUGIN`：条件格式（`highlightCell`、`colorScale`、`dataBar`、`iconSet`）
-  - `SHEET_PAGE_LAYOUT_PLUGIN`：页面布局（打印区域、页边距、纸张方向/大小、分页符）
+  - `SHEET_PAGE_LAYOUT_PLUGIN`：页面布局（打印区域、页边距、纸张方向/大小、打印缩放、分页符），兼容旧版 `SHEET_PRINT_AREA_PLUGIN`
+- 支持导出 PDF：
+  - Univer JSON 直接导出 PDF
+  - 已有 Excel 文件导出 PDF
+  - PDF 会使用打印区域、页边距、纸张方向/大小、打印缩放和分页符
 
 ## 环境要求
 
@@ -66,6 +70,14 @@ java -cp "target/classes;$(cat target/classpath.txt)" com.test.Main \
   target/univer-output2.xlsx
 ```
 
+输出 PDF 时，把输出路径写成 `.pdf`，`Main` 会自动调用 PDF 导出方法：
+
+```bash
+java -cp "target/classes;$(cat target/classpath.txt)" com.test.Main \
+  src/main/resources/data/univerData.json \
+  target/univer-output.pdf
+```
+
 在代码中使用：
 
 ```java
@@ -89,10 +101,19 @@ public class Demo {
             UniverJson2Excel.convertToOutputStream(in, out);
         }
 
-        // 方式4：转为 byte[]，便于存储或下载
+        // 方式4：转为 xlsx byte[]，便于存储或下载
         byte[] xlsxBytes = UniverJson2Excel.toXlsxBytes(univerJson);
 
-        // 方式5：构建 Aspose.Cells Workbook 后继续二次加工
+        // 方式5：Univer JSON -> PDF 文件（会使用打印区域、纸张方向、页边距、分页符）
+        UniverJson2Excel.convertToPdf(univerJson, "output.pdf");
+
+        // 方式6：Univer JSON -> PDF byte[]，适合 Web 下载
+        byte[] pdfBytes = UniverJson2Excel.toPdfBytes(univerJson);
+
+        // 方式7：已有 Excel 文件 -> PDF 文件
+        UniverJson2Excel.excelToPdf("output.xlsx", "output.pdf");
+
+        // 方式8：构建 Aspose.Cells Workbook 后继续二次加工
         com.aspose.cells.Workbook workbook = UniverJson2Excel.toWorkbook(univerJson);
         // 对 workbook 做额外操作...
         workbook.dispose();
@@ -108,6 +129,13 @@ public class Demo {
 | `convertToFile(File univerJsonFile, String outputPath)` | 将 Univer JSON 文件转换为 xlsx 文件 |
 | `convertToOutputStream(InputStream univerJson, OutputStream excelOut)` | 将 Univer JSON 输入流写入 Excel 输出流 |
 | `toXlsxBytes(String univerJson)` | 将 Univer JSON 字符串转换为 xlsx 字节数组 |
+| `convertToPdf(String univerJson, String outputPath)` | 将 Univer JSON 字符串转换为 PDF 文件 |
+| `convertToPdf(File univerJsonFile, String outputPath)` | 将 Univer JSON 文件转换为 PDF 文件 |
+| `convertToPdf(InputStream univerJson, OutputStream pdfOut)` | 将 Univer JSON 输入流写入 PDF 输出流 |
+| `toPdfBytes(String univerJson)` | 将 Univer JSON 字符串转换为 PDF 字节数组 |
+| `excelToPdf(String excelPath, String pdfPath)` | 将已有 Excel 文件导出为 PDF 文件 |
+| `excelToPdf(InputStream excelIn, OutputStream pdfOut)` | 将已有 Excel 输入流导出为 PDF 输出流 |
+| `excelToPdfBytes(InputStream excelIn)` | 将已有 Excel 输入流导出为 PDF 字节数组 |
 | `toWorkbook(String univerJson)` | 解析 JSON 并构建 Aspose.Cells Workbook |
 | `toWorkbook(InputStream univerJson)` | 从输入流解析 JSON 并构建 Aspose.Cells Workbook |
 
@@ -128,7 +156,7 @@ public class Demo {
 | `SHEET_NOTE_PLUGIN` | 批注 |
 | `SHEET_DRAWING_PLUGIN` | 图片 |
 | `SHEET_CONDITIONAL_FORMATTING_PLUGIN` | 条件格式（`highlightCell`、`colorScale`、`dataBar`、`iconSet`） |
-| `SHEET_PAGE_LAYOUT_PLUGIN` | 页面布局：打印区域、页边距、纸张方向/大小、分页符 |
+| `SHEET_PAGE_LAYOUT_PLUGIN` | 页面布局：打印区域、页边距、纸张方向/大小、打印缩放（`scaleMode`）、分页符 |
 
 ## 条件格式说明
 
@@ -163,8 +191,19 @@ public class Demo {
 - `pageSetup`：
   - `orientation`：`landscape` / `portrait`
   - `paperSize`：Excel 纸张大小编号，如 `9` 表示 A4
+  - `scaleMode`：打印缩放方式
+  - `scale`：普通缩放百分比，仅 `scaleMode = none` 时使用，范围 10-400
 - `rowBreaks`：水平分页符行索引数组
 - `columnBreaks`：垂直分页符列索引数组
+
+`scaleMode` 映射关系：
+
+| Univer scaleMode | 含义 | Excel 设置 |
+| --- | --- | --- |
+| `none` | 不缩放，使用普通缩放比例 | 关闭“调整为”，`scale` 默认 100 |
+| `fitSheet` | 整个工作表缩放到一页 | 宽 1 页、高 1 页 |
+| `fitColumns` | 所有列缩放到一页宽，行可跨页 | 宽 1 页、高不限 |
+| `fitRows` | 所有行缩放到一页高，列可跨页 | 宽不限、高 1 页 |
 
 示例：
 
@@ -184,7 +223,8 @@ public class Demo {
     },
     "pageSetup": {
       "orientation": "landscape",
-      "paperSize": 9
+      "paperSize": 9,
+      "scaleMode": "fitRows"
     },
     "rowBreaks": [20]
   }
@@ -204,7 +244,7 @@ public class Demo {
 ## 示例数据
 
 - `src/main/resources/data/univerData.json`：基础示例（含公式、富文本、批注、图片、筛选、页面布局，以及色阶/数据条/图标集/前 N 项/大于条件格式）
-- `src/main/resources/data/univerData2.json`：扩展示例（含旧版打印区域、`highlightCell` 条件格式）
+- `src/main/resources/data/univerData2.json`：扩展示例（含页面布局 `scaleMode = fitRows`、打印区域、`highlightCell` 条件格式）
 
 ## 最近更新
 
@@ -213,7 +253,8 @@ public class Demo {
 - 修复 `iconSet` 阈值类型和顺序还原（如 `percent` 类型的 `3Triangles` 等）
 - 修复 `Top10` 条件格式被错误还原为 `CellIs equal` 的问题
 - 修复条件格式背景色兼容性：DXF 同时写入 `fgColor` 与 `bgColor`，避免部分 Excel/WPS 不显示单元格底色
-- 适配 `SHEET_PAGE_LAYOUT_PLUGIN` 页面布局：打印区域、页边距、纸张方向/大小、行/列分页符
+- 适配 `SHEET_PAGE_LAYOUT_PLUGIN` 页面布局：打印区域、页边距、纸张方向/大小、打印缩放（`scaleMode`）、行/列分页符
+- 新增 PDF 导出能力：`convertToPdf`、`toPdfBytes`、`excelToPdf`、`excelToPdfBytes`
 
 ## 注意事项
 
