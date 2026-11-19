@@ -133,9 +133,12 @@ public class Demo {
 ## 条件格式说明
 
 - `highlightCell`：
-  - 映射为 Excel `CellIs` 条件格式
+  - 数字/文本比较映射为 Excel `CellIs` 条件格式
   - 支持 `equal`、`notEqual`、`greaterThan`、`greaterThanOrEqual`、`lessThan`、`lessThanOrEqual`、`between`、`notBetween`
   - 自动解析 Univer 的 `&quot;...&quot;` 文本字面量
+  - 支持子类型：`rank`（前 N 项/后 N 项）、`uniqueValues`（唯一值）、`duplicateValues`（重复值）、`formula`（公式）
+- 条件格式样式兼容性：
+  - `highlightCell`（如 `rank`、`greaterThan`、`lessThan` 等）的背景色会同时写入 DXF 的 `fgColor` 和 `bgColor`，避免部分 Excel/WPS 版本不显示单元格底色
 - `colorScale`：
   - 支持双色和三色色阶
   - 支持 `min` / `max` / `percent` / `percentile` / `formula` 取值类型
@@ -148,6 +151,7 @@ public class Demo {
   - 支持 `3Arrows`、`4Arrows`、`5Arrows`、`3TrafficLights1`、`3TrafficLights2`、`3Symbols`、`3Flags`、`3Stars` 等常见图标集
   - 按 Univer 的 `config` 顺序逆序写入 Excel 阈值（Excel 阈值从低到高排列）
   - 支持 `num` / `percent` / `percentile` / `formula` 等取值类型
+  - 部分图标集（如 `3Triangles`、`3Stars` 等）会以 x14 扩展条件格式写入，Excel 2010+ 可正常显示
 
 ## 当前未支持（可继续扩展）
 
@@ -156,13 +160,21 @@ public class Demo {
 - `SHEET_DEFINED_NAME_PLUGIN`：定义名称
 - `SHEET_WORKSHEET_PROTECTION_PLUGIN`：工作表保护
 - `SHEET_UNIVER_THREAD_COMMENT_PLUGIN`：论坛批注
-- 条件格式中 `highlightCell` 的更多子类型：唯一值/重复值/前 N 项/文本/日期/平均值/公式
+- 条件格式中 `highlightCell` 的更多子类型：文本/日期/平均值
 - 超链接、OLE 附件等
 
 ## 示例数据
 
-- `src/main/resources/data/univerData.json`：基础示例（含公式、富文本、批注、图片、筛选、色阶条件格式）
+- `src/main/resources/data/univerData.json`：基础示例（含公式、富文本、批注、图片、筛选，以及色阶/数据条/图标集/前 N 项/大于条件格式）
 - `src/main/resources/data/univerData2.json`：扩展示例（含打印区域、`highlightCell` 条件格式）
+
+## 最近更新
+
+- 条件格式新增 `dataBar`、`iconSet` 支持
+- `highlightCell` 新增子类型支持：`rank`（前 N 项/后 N 项）、`uniqueValues`、`duplicateValues`、`formula`
+- 修复 `iconSet` 阈值类型和顺序还原（如 `percent` 类型的 `3Triangles` 等）
+- 修复 `Top10` 条件格式被错误还原为 `CellIs equal` 的问题
+- 修复条件格式背景色兼容性：DXF 同时写入 `fgColor` 与 `bgColor`，避免部分 Excel/WPS 不显示单元格底色
 
 ## 注意事项
 

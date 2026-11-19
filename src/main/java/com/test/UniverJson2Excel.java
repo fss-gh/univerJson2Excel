@@ -26,6 +26,7 @@ import com.aspose.cells.OperatorType;
 import com.aspose.cells.SaveFormat;
 import com.aspose.cells.Style;
 import com.aspose.cells.TextAlignmentType;
+import com.aspose.cells.Top10;
 import com.aspose.cells.VisibilityType;
 import com.aspose.cells.Workbook;
 import com.aspose.cells.Worksheet;
@@ -538,6 +539,9 @@ public final class UniverJson2Excel {
             if (color != null) {
                 style.setPattern(BackgroundType.SOLID);
                 style.setForegroundColor(color);
+                // 同时设置背景色：部分 Excel/WPS 对条件格式 DXF 中的 bgColor 识别更稳定，
+                // 避免只写 fgColor 导致“前 N 项/大于”等条件格式不显示单元格底色。
+                style.setBackgroundColor(color);
             }
         }
 
@@ -880,14 +884,64 @@ public final class UniverJson2Excel {
     }
 
     private static void addHighlightCellCondition(FormatConditionCollection fcc, JsonNode cfNode, JsonNode rule) {
+        String subType = rule.path("subType").asText("");
+        if ("rank".equals(subType)) {
+            addRankCondition(fcc, cfNode, rule);
+            return;
+        }
+        if ("uniqueValues".equals(subType)) {
+            addSimpleHighlightCondition(fcc, cfNode, rule, FormatConditionType.UNIQUE_VALUES);
+            return;
+        }
+        if ("duplicateValues".equals(subType)) {
+            addSimpleHighlightCondition(fcc, cfNode, rule, FormatConditionType.DUPLICATE_VALUES);
+            return;
+        }
+        if ("formula".equals(subType)) {
+            addFormulaHighlightCondition(fcc, cfNode, rule);
+            return;
+        }
+
         String operator = rule.path("operator").asText("equal");
-        String formula1 = toConditionFormulaValue(rule.path("value"));
         int op = mapHighlightCellOperator(operator);
+        JsonNode valueNode = rule.path("value");
 
         int idx = fcc.addCondition(FormatConditionType.CELL_VALUE);
         FormatCondition condition = fcc.get(idx);
         condition.setOperator(op);
-        condition.setFormula1(formula1);
+        if ((op == OperatorType.BETWEEN || op == OperatorType.NOT_BETWEEN)
+                && valueNode.isArray() && valueNode.size() >= 2) {
+            condition.setFormula1(toConditionFormulaValue(valueNode.get(0)));
+            condition.setFormula2(toConditionFormulaValue(valueNode.get(1)));
+        } else {
+            condition.setFormula1(toConditionFormulaValue(valueNode));
+        }
+        applyConditionStyle(condition, rule.path("style"));
+        configureCondition(condition, cfNode);
+    }
+
+    private static void addSimpleHighlightCondition(FormatConditionCollection fcc, JsonNode cfNode, JsonNode rule, int type) {
+        int idx = fcc.addCondition(type);
+        FormatCondition condition = fcc.get(idx);
+        applyConditionStyle(condition, rule.path("style"));
+        configureCondition(condition, cfNode);
+    }
+
+    private static void addRankCondition(FormatConditionCollection fcc, JsonNode cfNode, JsonNode rule) {
+        int idx = fcc.addCondition(FormatConditionType.TOP_10);
+        FormatCondition condition = fcc.get(idx);
+        Top10 top10 = condition.getTop10();
+        top10.setBottom(rule.path("isBottom").asBoolean(false));
+        top10.setPercent(rule.path("isPercent").asBoolean(false));
+        top10.setRank(rule.path("value").asInt(10));
+        applyConditionStyle(condition, rule.path("style"));
+        configureCondition(condition, cfNode);
+    }
+
+    private static void addFormulaHighlightCondition(FormatConditionCollection fcc, JsonNode cfNode, JsonNode rule) {
+        int idx = fcc.addCondition(FormatConditionType.EXPRESSION);
+        FormatCondition condition = fcc.get(idx);
+        condition.setFormula1(toConditionFormulaValue(rule.path("value")));
         applyConditionStyle(condition, rule.path("style"));
         configureCondition(condition, cfNode);
     }
@@ -1047,28 +1101,40 @@ public final class UniverJson2Excel {
         if (item == null || item.isNull()) {
             return;
         }
-        // 兼容两种写法：{ type: "num", value: 20 } 或直接写数值/文本。
-        JsonNode valueConfig = item.isObject() ? item.get("value") : item;
-        if (valueConfig == null || !valueConfig.isObject()) {
-            cfvo.setType(FormatConditionValueType.NUMBER);
-            if (valueConfig != null && !valueConfig.isNull()) {
-                if (valueConfig.isNumber()) {
-                    cfvo.setValue(valueConfig.asDouble());
-                } else {
-                    cfvo.setValue(valueConfig.asText());
-                }
-            }
+        // 兼容三种入参：
+        // 1) 色阶条目 { value: { type, value }, color: ... }
+        // 2) 值配置本身 { type: "num", value: 20 }
+        // 3) 直接写数值/文本
+        if (item.isObject() && item.has("type")) {
+            applyConditionValue(cfvo, item);
+        } else if (item.isObject() && item.has("value")) {
+            applyConditionValue(cfvo, item.get("value"));
+        } else {
+            applyConditionValue(cfvo, item);
+        }
+    }
+
+    private static void applyConditionValue(ConditionalFormattingValue cfvo, JsonNode valueConfig) {
+        if (valueConfig == null || valueConfig.isNull()) {
             return;
         }
-        String type = valueConfig.path("type").asText("");
-        cfvo.setType(mapConditionValueType(type));
+        if (!valueConfig.isObject()) {
+            cfvo.setType(FormatConditionValueType.NUMBER);
+            setConditionValue(cfvo, valueConfig);
+            return;
+        }
+        cfvo.setType(mapConditionValueType(valueConfig.path("type").asText("")));
         JsonNode valueNode = valueConfig.get("value");
         if (valueNode != null && !valueNode.isNull()) {
-            if (valueNode.isNumber()) {
-                cfvo.setValue(valueNode.asDouble());
-            } else {
-                cfvo.setValue(valueNode.asText());
-            }
+            setConditionValue(cfvo, valueNode);
+        }
+    }
+
+    private static void setConditionValue(ConditionalFormattingValue cfvo, JsonNode valueNode) {
+        if (valueNode.isNumber()) {
+            cfvo.setValue(valueNode.asDouble());
+        } else {
+            cfvo.setValue(valueNode.asText());
         }
     }
 
