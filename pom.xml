@@ -27,9 +27,9 @@
         <dependency>
             <groupId>com.aspose</groupId>
             <artifactId>aspose-cells</artifactId>
-            <version>25.10</version>
+            <version>26.11</version>
             <scope>system</scope>
-            <systemPath>${project.basedir}/src/main/resources/libs/aspose-cells-25.10.jar</systemPath>
+            <systemPath>${project.basedir}/src/main/resources/libs/aspose-cells-26.11.jar</systemPath>
         </dependency>
     </dependencies>
 
